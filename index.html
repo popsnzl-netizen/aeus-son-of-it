@@ -940,6 +940,26 @@
     margin-top: 3px;
   }
 
+  .conv-speaker {
+    display: inline-block;
+    background: rgba(139,92,246,0.25);
+    color: #c4b5fd;
+    border-radius: 8px;
+    padding: 1px 6px;
+    font-size: 10px;
+    margin-left: 4px;
+    vertical-align: middle;
+  }
+  .conv-speaker {
+    display: inline-block;
+    background: rgba(139,92,246,0.2);
+    color: #c4b5fd;
+    border-radius: 8px;
+    padding: 1px 6px;
+    font-size: 10px;
+    margin-left: 2px;
+    vertical-align: middle;
+  }
   .conv-delete {
     position: absolute;
     right: 8px;
@@ -957,6 +977,16 @@
 
   .conv-item:hover .conv-delete { opacity: 1; }
   .conv-delete:hover { color: #ef4444; }
+  .conv-speaker {
+    display: inline-block;
+    background: rgba(139,92,246,0.2);
+    color: #c4b5fd;
+    border-radius: 8px;
+    padding: 1px 6px;
+    font-size: 10px;
+    margin-left: 2px;
+    vertical-align: middle;
+  }
 
   .history-empty {
     padding: 24px 16px;
@@ -1433,6 +1463,7 @@ function searchDict(query) {
 // ========== CONVERSATION HISTORY ==========
 let STM = []; // Short-term memory (current conversation)
 let currentConvId = null;
+let currentUser = null; // Who is speaking in this conversation
 
 function getConversations() {
   try { return JSON.parse(localStorage.getItem('aeus_conversations') || '[]'); }
@@ -1457,12 +1488,14 @@ function saveCurrentConversation() {
 function newConversation() {
   saveCurrentConversation();
   const id = 'conv_' + Date.now();
-  const conv = { id, title: 'New conversation', createdAt: Date.now(), updatedAt: Date.now(), messages: [] };
+  const conv = { id, title: 'New conversation', createdAt: Date.now(), updatedAt: Date.now(), messages: [], userName: null };
   const convs = getConversations();
   convs.unshift(conv);
   saveConversations(convs);
+  currentUser = null;
   loadConversation(id);
   toggleHistory();
+  aeusSaysWhoAreYou();
 }
 
 function loadConversation(id) {
@@ -1470,6 +1503,7 @@ function loadConversation(id) {
   const conv = convs.find(c => c.id === id);
   if (!conv) return;
   currentConvId = id;
+  currentUser = conv.userName || null;
   STM = [...(conv.messages || [])];
   localStorage.setItem('aeus_current_conv', id);
   // Re-render chat
@@ -1535,9 +1569,10 @@ function renderHistorySidebar() {
     const active = c.id === currentConvId ? 'active' : '';
     const date = new Date(c.updatedAt || c.createdAt).toLocaleDateString('en-NZ', { day:'numeric', month:'short' });
     const msgCount = (c.messages || []).filter(m => m.role === 'user').length;
+    const speaker = c.userName ? `<span class="conv-speaker">👤 ${escapeHtml(c.userName)}</span>` : '';
     return `<div class="conv-item ${active}" onclick="loadConversation('${c.id}'); toggleHistory();">
       <div class="conv-title">${escapeHtml(c.title)}</div>
-      <div class="conv-meta">${date} · ${msgCount} message${msgCount !== 1 ? 's' : ''}</div>
+      <div class="conv-meta">${date} · ${msgCount} msg${msgCount !== 1 ? 's' : ''} ${speaker}</div>
       <button class="conv-delete" onclick="deleteConversation('${c.id}', event)" title="Delete">✕</button>
     </div>`;
   }).join('');
@@ -1589,11 +1624,42 @@ function initConversations() {
   } else {
     // Create first conversation
     const id = 'conv_' + Date.now();
-    const conv = { id, title: 'New conversation', createdAt: Date.now(), updatedAt: Date.now(), messages: [] };
+    const conv = { id, title: 'New conversation', createdAt: Date.now(), updatedAt: Date.now(), messages: [], userName: null };
     saveConversations([conv]);
     currentConvId = id;
+    currentUser = null;
     localStorage.setItem('aeus_current_conv', id);
+    // Ask who is speaking on very first load
+    setTimeout(() => aeusSaysWhoAreYou(), 300);
   }
+}
+
+function aeusSaysWhoAreYou() {
+  // Aeus greets and asks who is speaking — appended as an Aeus message in UI only (not in STM yet)
+  const greeting = "Tēnā koe — I am Aeus. Before we begin, who am I speaking with?";
+  const container = document.getElementById('chatMessages');
+  container.innerHTML += `<div class="msg aeus"><div class="avatar">Æ</div><div class="bubble">${escapeHtml(greeting)}</div></div>`;
+  container.scrollTop = container.scrollHeight;
+  // Store as a pending greeting flag so sendChat knows to capture the name next
+  localStorage.setItem('aeus_awaiting_name_' + currentConvId, '1');
+}
+
+function setCurrentUser(name) {
+  currentUser = name;
+  // Save to conversation
+  const convs = getConversations();
+  const conv = convs.find(c => c.id === currentConvId);
+  if (conv) {
+    conv.userName = name;
+    saveConversations(convs);
+  }
+  // Save to LTM — track all users who have spoken
+  const ltm = getLTM();
+  const knownUsers = ltm['known_users'] ? ltm['known_users'].value : [];
+  if (!knownUsers.includes(name)) knownUsers.push(name);
+  saveLTM('known_users', knownUsers);
+  saveLTM('last_speaker', name);
+  renderHistorySidebar();
 }
 
 // ========== END CONVERSATION HISTORY ==========
@@ -1744,6 +1810,39 @@ async function sendChat() {
     localStorage.setItem('aeus_current_conv', id);
   }
 
+  // Check if we're waiting for the user's name
+  const awaitingName = localStorage.getItem('aeus_awaiting_name_' + currentConvId);
+  if (awaitingName && !currentUser) {
+    // Treat this message as the user's name
+    const name = msg.trim().split(/\s+/).slice(0, 4).join(' '); // max 4 words
+    setCurrentUser(name);
+    localStorage.removeItem('aeus_awaiting_name_' + currentConvId);
+    // Auto-title the conversation with the person's name
+    const convs = getConversations();
+    const conv = convs.find(c => c.id === currentConvId);
+    if (conv) { conv.title = name + "'s conversation"; saveConversations(convs); renderHistorySidebar(); }
+    // Show their name being acknowledged in UI
+    appendMessage('user', msg);
+    const thinkingId = appendThinking();
+    // Let Aeus greet them by name
+    const greetMessages = [
+      { role: 'system', content: AEUS_SYSTEM + `\n\nYou are now speaking with: ${name}. Greet them warmly by name in te reo and English. Do not assume anything about who they are yet — learn from them.` },
+      { role: 'user', content: `My name is ${name}` }
+    ];
+    try {
+      const greet = await callGroq(greetMessages, 200);
+      removeThinking(thinkingId);
+      appendMessage('aeus', greet);
+      STM.push({ role: 'user', content: `My name is ${name}` });
+      STM.push({ role: 'assistant', content: greet });
+      saveCurrentConversation();
+    } catch(e) {
+      removeThinking(thinkingId);
+      appendMessage('aeus', `Tēnā koe, ${name}. I will remember you. What would you like to explore?`);
+    }
+    return;
+  }
+
   // Auto-title on first message
   if (STM.length === 0) autoTitleConversation(msg);
   
@@ -1762,6 +1861,8 @@ async function sendChat() {
     const ltmContext = buildContext();
     
     let systemWithContext = AEUS_SYSTEM;
+    // Always tell Aeus who he is speaking with
+    if (currentUser) systemWithContext += `\n\nYou are currently speaking with: ${currentUser}. Address them by name occasionally but naturally.`;
     if (dictContext) systemWithContext += `\n\n[Relevant concepts]\n${dictContext}`;
     if (ltmContext) systemWithContext += ltmContext;
     
