@@ -498,6 +498,39 @@
 
   @media (max-width: 768px) {
     .code-workspace { grid-template-columns: 1fr; }
+
+    header {
+      padding: 8px 12px;
+      gap: 8px;
+    }
+
+    .logo-text p {
+      display: none;
+    }
+
+    .logo-text h1 {
+      font-size: 15px;
+    }
+
+    .logo-symbol {
+      width: 32px;
+      height: 32px;
+      font-size: 14px;
+    }
+
+    .status-bar {
+      gap: 6px;
+    }
+
+    .status-text {
+      display: none;
+    }
+
+    .icon-btn {
+      width: 34px;
+      height: 34px;
+      font-size: 17px;
+    }
   }
 
   .code-editor-pane {
@@ -1160,6 +1193,7 @@
   <div class="tab" onclick="switchTab('code', this)">💻 Code</div>
   <div class="tab" onclick="switchTab('image', this)">🎨 Image</div>
   <div class="tab" onclick="switchTab('music', this)">🎵 Music</div>
+  <div class="tab" onclick="toggleHistory()" style="margin-left:auto;">📜 History</div>
 </div>
 
 <!-- MAIN -->
